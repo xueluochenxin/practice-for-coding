@@ -1,0 +1,3 @@
+﻿  control penal.cpp
+E:\visual studio 2022\poject\stl class 管理系统\stl class 管理系统\control penal.cpp(59,6): warning C4101: “tempid”: 未引用的局部变量
+  stl class 管理系统.vcxproj -> E:\visual studio 2022\poject\stl class 管理系统\x64\Debug\stl class 管理系统.exe
