@@ -1,0 +1,179 @@
+================================================================================
+
+生成日期:2026-10-18
+说明:每个库的对外函数均带独立前缀(avl_ / RBTREE_ / hashmap_ / skiplist_),
+     可以同时 #include 到同一个工程里互不冲突。
+     HASHMAP 与 SKIPLIST 都用到 KEY_TYPE 宏(默认 int),
+     两者同时使用且要改键类型时,需在 include 前统一 #define KEY_TYPE 同一类型。
+================================================================================
+
+
+################################################################################
+## 1. AVL 树 (AVL.h / AVL.c) —— 自平衡二叉搜索树
+################################################################################
+   键值:纯 int 键,不存 value
+   约定:叶子 height 记作 1,空节点 height 为 0;
+         增删函数返回"新的子树根",调用方必须用返回值覆盖原 root;
+         插入重复 key 不创建新节点;分配失败返回 NULL 且原树不变。
+
+--- 查询/工具 ---
+int       avl_height(const avl_node *x);   /* 节点高度,空节点返回 0 */
+int       avl_balance(const avl_node *x);  /* 平衡因子 = 左高 - 右高,空节点返回 0 */
+avl_node *avl_search(avl_node *root, int key);  /* 查找,未找到返回 NULL */
+avl_node *avl_min(avl_node *root);         /* 最小值节点,NULL 安全 */
+avl_node *avl_max(avl_node *root);         /* 最大值节点,NULL 安全 */
+
+--- 增删 ---
+avl_node *avl_insert(avl_node *root, int key);
+    /* 插入 key,自动旋转保持平衡;重复 key 原样返回;分配失败返回 NULL(原树不变) */
+avl_node *avl_delete(avl_node *root, int key);
+    /* 删除 key,自动旋转;key 不存在时原样返回 root */
+
+--- 销毁/遍历/校验 ---
+void avl_destroy(avl_node *root);          /* 释放整棵树所有节点 */
+void avl_inorder(const avl_node *root);    /* 中序遍历按 key 升序打印(测试用) */
+int  avl_check(const avl_node *root);      /* 校验 BST+AVL 性质:1 合法,0 非法(测试用) */
+
+
+################################################################################
+## 2. 红黑树 (RBTREE.h / RBTREE.c) —— 侵入式红黑树
+################################################################################
+   键值:KEY_TYPE 键(默认 int) + void *value(业务数据指针,库不负责释放)
+   约定:侵入式设计 —— 节点由调用方 malloc 并填好 key/value 后传入;
+         树内用哨兵 nil(黑色)表示空;库只 free 节点本身,不 free value。
+
+--- 创建/销毁 ---
+rbtree *RBTREE_create(void);               /* 创建树,失败返回 NULL */
+void    RBTREE_destroy(rbtree *T);          /* 销毁树:释放所有业务节点+哨兵+树本身(不 free value) */
+
+--- 查找 ---
+rbtree_node *RBTREE_search(rbtree *T, KEY_TYPE key);
+    /* 返回找到的节点指针,没找到返回 NULL */
+
+--- 插入/删除 ---
+int RBTREE_insert(rbtree *T, rbtree_node *z);
+    /* z 必须是 malloc 出来的且 key/value 已填好;
+       返回 0 成功;-1 表示 key 已存在(节点未插入,由调用方自行释放 z) */
+int RBTREE_delete(rbtree *T, KEY_TYPE key);
+    /* 删除 key 并修复红黑性质;返回 0 成功;-1 表示 key 不存在;
+       只 free 节点本身,不 free(z->value) */
+
+--- 校验与打印(测试用) ---
+int  RBTREE_check(rbtree *T);              /* 校验红黑性质:返回 1 合法,0 非法 */
+void RBTREE_inorder(rbtree *T, rbtree_node *node);  /* 中序遍历按 key 升序打印 */
+
+--- 相关宏/类型 ---
+RBTREE_ENTRY(name, type)                   /* 侵入式节点成员宏,可嵌入任意业务结构体 */
+RED / BLACK                                 /* 颜色常量 ((color_t)1) / ((color_t)2) */
+
+
+################################################################################
+## 3. 哈希表 (hashmap.h / hashmap.c) —— 开放寻址(线性探测)
+################################################################################
+   键值:KEY_TYPE 键(默认 int)+ void *value(调用方分配/释放,库只存指针)
+   约定:负载因子 0.7 自动扩容(容量翻倍);删除用墓碑(DELETED)惰性删除;
+         线程不安全,单线程使用。
+
+--- 创建/销毁 ---
+hashmap *hashmap_create(size_t initial_cap);
+    /* 0 = 默认容量 16,否则向上取 2 的幂;内存不足返回 NULL */
+void hashmap_destroy(hashmap *m, hashmap_val_free_fn free_value);
+    /* 销毁整张表;free_value 非 NULL 时对每个仍存在的 value 调用一次;传 NULL 库不碰 value */
+void hashmap_clear(hashmap *m, hashmap_val_free_fn free_value);
+    /* 清空所有键值对(保留容量不缩小);free_value 语义同 destroy */
+
+--- 增/删/改 ---
+int hashmap_put(hashmap *m, KEY_TYPE key, void *value);
+    /* 插入或更新;返回 1 插入成功,0 更新了已有键,-1 内存分配失败(见 last_error) */
+int hashmap_remove(hashmap *m, KEY_TYPE key);
+    /* 删除 key;成功返回 1,key 不存在返回 0 */
+
+--- 查/读 ---
+void  *hashmap_get(const hashmap *m, KEY_TYPE key);      /* 取值,不存在返回 NULL */
+int    hashmap_contains(const hashmap *m, KEY_TYPE key); /* 存在返回 1,否则 0 */
+size_t hashmap_size(const hashmap *m);                   /* 键值对数量 */
+int    hashmap_empty(const hashmap *m);                  /* 空表返回 1,否则 0 */
+
+--- 遍历 ---
+int    hashmap_foreach(const hashmap *m, hashmap_iter_fn fn, void *userdata);
+    /* 依次回调每个 (key,value);fn 返回非 0 提前结束并原样传出;
+       遍历期间禁止 put/remove(未定义行为);全遍历完返回 0 */
+size_t hashmap_keys(const hashmap *m, KEY_TYPE *out_keys);
+    /* 把所有 key 拷入 out_keys(容量至少 size),返回实际写入个数;
+       out_keys 由调用方分配 */
+
+--- 扩展/错误处理 ---
+int hashmap_reserve(hashmap *m, size_t n);
+    /* 预留至少容纳 n 个元素的容量;成功 0,内存不足 -1 */
+int hashmap_last_error(const hashmap *m);
+    /* 上次操作状态码:HASHMAP_OK(0) / HASHMAP_ERR_OOM(1) /
+       HASHMAP_ERR_FULL(2) / HASHMAP_ERR_NOTFOUND(3);m 为 NULL 返回 NOTFOUND */
+
+--- 回调类型 ---
+typedef int  (*hashmap_iter_fn)(KEY_TYPE key, void *value, void *userdata);
+typedef void (*hashmap_val_free_fn)(void *value);
+
+
+################################################################################
+## 4. 跳表 (skiplist.h / skiplist.c) —— 有序多层链表
+################################################################################
+   键值:KEY_TYPE 键(默认 int)+ void *value(调用方分配/释放)
+   约定:key 升序;期望最高 32 层,每层晋升概率 p=0.5;
+         重复 key 视作"更新"(返回 0);带头结点 + NULL 哨兵尾。
+
+--- 创建/销毁 ---
+skiplist *skiplist_create(int max_level);
+    /* 0 = 默认 32 层,传入值夹到 [1, 32];失败返回 NULL */
+void skiplist_destroy(skiplist *s, skiplist_val_free_fn free_value);
+    /* 销毁并释放全部节点;free_value 非 NULL 时对每个 value 调用一次 */
+void skiplist_clear(skiplist *s, skiplist_val_free_fn free_value);
+    /* 清空所有节点(保留结构可继续插入);free_value 语义同 destroy */
+
+--- 增/删/改 ---
+int skiplist_insert(skiplist *s, KEY_TYPE key, void *value);
+    /* 返回 1 插入成功;0 key 已存在(更新,旧值不释放);-1 内存分配失败 */
+int skiplist_erase(skiplist *s, KEY_TYPE key);
+    /* 删除 key;成功返回 1,不存在返回 0;只 free 节点,不 free value */
+
+--- 查/读 ---
+void  *skiplist_get(skiplist *s, KEY_TYPE key);      /* 取值,不存在返回 NULL 并置 NOTFOUND */
+int    skiplist_contains(const skiplist *s, KEY_TYPE key);  /* 存在返回 1,否则 0 */
+size_t skiplist_size(const skiplist *s);             /* 元素个数 */
+int    skiplist_empty(const skiplist *s);            /* 空表返回 1 */
+
+--- 有序范围(跳表核心优势) ---
+skiplist_node *skiplist_first(const skiplist *s);
+    /* key 最小的节点;空表返回 NULL(头结点不算) */
+skiplist_node *skiplist_next(const skiplist *s, skiplist_node *node);
+    /* 严格大于 node->key 的下一个节点;越界返回 NULL;
+       注意:遍历期间禁止插入/删除(会使 node 悬空) */
+int skiplist_range(skiplist *s, KEY_TYPE low, KEY_TYPE high,
+                   skiplist_iter_fn fn, void *userdata);
+    /* 闭区间 [low, high] 升序回调 fn;fn 返回非 0 提前终止并作为返回值传出;
+       low > high 返回 -1(置 SKIPLIST_ERR_RANGE);全部完成返回 0 */
+
+--- 遍历 ---
+int skiplist_foreach(const skiplist *s, skiplist_iter_fn fn, void *userdata);
+    /* 按 key 升序回调每个 (key,value);fn 返回非 0 提前结束并传出 */
+
+--- 扩展/错误处理 ---
+int skiplist_set_p(skiplist *s, int p_q5);
+    /* 修改晋升概率 p(p_q5 = p*32,范围 [1,32],默认 16 即 0.5);
+       只影响之后新节点;成功 0,参数越界 -1 */
+int skiplist_last_error(const skiplist *s);
+    /* 上次操作状态码:SKIPLIST_OK(0) / SKIPLIST_ERR_OOM(1) /
+       SKIPLIST_ERR_RANGE(2) / SKIPLIST_ERR_NOTFOUND(3) / SKIPLIST_ERR_PARAM(4) */
+
+--- 回调类型/常量 ---
+typedef int  (*skiplist_iter_fn)(KEY_TYPE key, void *value, void *userdata);
+typedef void (*skiplist_val_free_fn)(void *value);
+SKIPLIST_P_Q5_DEFAULT(16) / SKIPLIST_MAX_LEVEL(32)
+
+
+################################################################################
+## 调用速记
+################################################################################
+AVL:      root = avl_insert(root, k);  root = avl_delete(root, k);  avl_destroy(root);
+RBTREE:   T = RBTREE_create(); n = malloc(...); n->key = k; RBTREE_insert(T, n); RBTREE_destroy(T);
+hashmap:  m = hashmap_create(0); hashmap_put(m, k, ptr); hashmap_destroy(m, free_fn);
+skiplist: s = skiplist_create(0); skiplist_insert(s, k, ptr); skiplist_destroy(s, free_fn);
